@@ -1,4 +1,4 @@
-zproxy : socket_server.c test.c
+zproxy : socket_server.c main.c
 	gcc -g -Wall -o $@ $^ -lpthread
 
 clean:

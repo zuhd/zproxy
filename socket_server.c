@@ -16,7 +16,7 @@
 // MAX_SOCKET will be 2^MAX_SOCKET_P
 #define MAX_SOCKET_P 16
 #define MAX_EVENT 64
-#define MIN_READ_BUFFER 64
+#define MIN_READ_BUFFER 64 * 16 * 10
 #define SOCKET_TYPE_INVALID 0
 #define SOCKET_TYPE_RESERVE 1
 #define SOCKET_TYPE_PLISTEN 2
@@ -604,6 +604,7 @@ forward_message(struct socket_server *ss, struct socket *s, struct socket_messag
 		return -1;
 	}
 
+	// ¶¯Ì¬µ÷Õû³ß´ç
 	if (n == sz) {
 		s->size *= 2;
 	} else if (sz > MIN_READ_BUFFER && n*2 < sz) {
