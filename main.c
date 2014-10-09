@@ -5,6 +5,55 @@
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
+#include <arpa/inet.h>
+
+
+struct sock5req1 
+{ 
+	char Ver; 
+	char nMethods; 
+	char Methods[255]; 
+}; 
+
+struct sock5ans1 
+{ 
+	char Ver; 
+	char Method; 
+}; 
+
+struct sock5req2 
+{ 
+	char Ver; 
+	char Cmd; 
+	char Rsv; 
+	char Atyp; 
+	unsigned long IPAddr;
+	unsigned short Port;
+}; 
+
+struct sock5ans2 
+{ 
+	char Ver; 
+	char Rep; 
+	char Rsv; 
+	char Atyp; 
+	char other[1]; 
+}; 
+
+struct authreq 
+{ 
+	char Ver; 
+	char Ulen; 
+	char Name[255]; 
+	char PLen; 
+	char Pass[255]; 
+}; 
+
+struct authans 
+{ 
+	char Ver; 
+	char Status; 
+}; 
 
 
 //opaque 相当于Session的指针地址
@@ -45,12 +94,62 @@ on_connection(struct socket_server *ss, uintptr_t opaque, int id)
 static void 
 on_recv(struct socket_server *ss, int id, const char* pData, int nLen)
 {
+	// 针对SOCKS5代理协议
+	struct sock5req1* req1 = (struct sock5req1*)pData;
+	struct sock5req2* req2 = (struct sock5req2*)pData;
 	const char* p1 = strstr(pData, "CONNECT");
 	const char* p2 = strstr(pData, "HTTP");
 	const char* p3 = strstr(pData, ":");
+	
+	
+	if (req2 != NULL &&
+		nLen >= 10)
+	{
+		if (req2->Ver == 5 &&
+			req2->Cmd == 1 &&
+			req2->Rsv == 0 &&
+			req2->Atyp == 1)
+		{
+			struct sock5ans2 ans2;
+			ans2.Ver = 5;
+			ans2.Rep = 0;
+			char* pRet = (char*)malloc(128);
+			memset(pRet, 0, 128);
+			memcpy(pRet, &ans2, sizeof(ans2));
+			socket_server_send(ss, id,pRet, sizeof(ans2));
+			// 连接目标服务器
+			struct in_addr inaddr;
+			inaddr.s_addr = req2->IPAddr;			
+			socket_server_connect(ss,nOpaque,inet_ntoa(inaddr),ntohs(req2->Port));
+			pair[nPairIndex].pair_opaque = nOpaque;
+			pair[nPairIndex].pair_recvid = id;
+			nPairIndex++;
+			nOpaque++;
+			printf("SOCKS5 addr=%s, port=%d\n", inet_ntoa(inaddr), ntohs(req2->Port));
+			return;
+		}
+	}	
+	if (req1 != NULL &&
+		nLen >= 2)
+	{
+		if (req1->Ver == 5 &&
+			req1->nMethods == 1)
+		{
+			struct sock5ans1 ans1;
+			ans1.Ver = 5;
+			ans1.Method = 0;
+			char* pRet = (char*)malloc(128);	
+			memset(pRet, 0, 128);
+		 	memcpy(pRet, &ans1, sizeof(ans1));
+			socket_server_send(ss, id, pRet, sizeof(ans1));
+			return;
+		}
+	}	
+	
 	if (p1 != NULL &&
 		p2 != NULL)
 	{
+		// HTTP代理协议
 		char szIP[32] = {0};
 		strncpy(szIP, p1+8, p3-p1-8);
 		printf("%s\n", szIP);
@@ -67,26 +166,24 @@ on_recv(struct socket_server *ss, int id, const char* pData, int nLen)
 		pair[nPairIndex].pair_recvid = id;
 		nPairIndex++;
 		nOpaque++;
-	}
-	else
+		return;
+	}	
+	// 直接转发消息
+	int i = 0;
+	for (i = 0; i < MAX_PAIR; i++)
 	{
-		// 直接转发消息
-		int i = 0;
-		for (i = 0; i < MAX_PAIR; i++)
+		if (pair[i].pair_recvid == id)
 		{
-			if (pair[i].pair_recvid == id)
-			{
-				if (pair[i].pair_sendid > 0)
-				{				
-					char* pCopy = (char*)malloc(nLen);
-					memcpy(pCopy, pData, nLen);
-					printf("recvid=%d, sendid=%d, data=%s, len=%d\n", pair[i].pair_recvid, pair[i].pair_sendid, pCopy, nLen);
-					socket_server_send(ss, pair[i].pair_sendid, pCopy, nLen);
-					break;
-				}
+			if (pair[i].pair_sendid > 0)
+			{				
+				char* pCopy = (char*)malloc(nLen);
+				memcpy(pCopy, pData, nLen);
+				printf("recvid=%d, sendid=%d, data=%s, len=%d\n", pair[i].pair_recvid, pair[i].pair_sendid, pCopy, nLen);
+				socket_server_send(ss, pair[i].pair_sendid, pCopy, nLen);
+				break;
 			}
-		}		
-	}
+		}
+	}	
 }
 
 static void *
